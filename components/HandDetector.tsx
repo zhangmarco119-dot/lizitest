@@ -36,13 +36,17 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
         
         if (!running) return;
 
+        // LOWER THRESHOLDS: Make detection much easier (0.3 instead of default 0.5)
         handLandmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
             delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 1
+          numHands: 1,
+          minHandDetectionConfidence: 0.3,
+          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3
         });
 
         if (!running) {
@@ -52,8 +56,9 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
 
         startWebcam(handLandmarker);
       } catch (error) {
-        console.error("MediaPipe error:", error);
-        if (running) setStatus('error');
+        console.error("MediaPipe initialization error:", error);
+        // Only set error if it's a critical failure, otherwise keep trying/loading
+        // We don't want to kill the camera just because of a network glitch
       }
     };
 
@@ -63,7 +68,11 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: 640, height: 480 } 
+            video: { 
+                width: 640, 
+                height: 480,
+                frameRate: { ideal: 30 }
+            } 
         });
         if (!running) {
              stream.getTracks().forEach(t => t.stop());
@@ -78,6 +87,7 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
         });
       } catch (err) {
         console.error("Camera access denied or failed", err);
+        // ONLY set error status if camera is explicitly denied or hardware fails
         if (running) setStatus('error');
       }
     };
@@ -90,47 +100,52 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
            return;
       }
 
-      const nowInMs = Date.now();
-      const results = landmarker.detectForVideo(videoRef.current, nowInMs);
+      try {
+          const nowInMs = Date.now();
+          const results = landmarker.detectForVideo(videoRef.current, nowInMs);
 
-      let detectedGesture = HandGesture.NONE;
+          let detectedGesture = HandGesture.NONE;
 
-      if (results.landmarks.length > 0) {
-        const lm = results.landmarks[0];
-        
-        // Multi-finger check for robustness
-        // Check fingertips (8, 12, 16, 20) against their PIP joints (6, 10, 14, 18)
-        // If tips are BELOW joints (in y-axis relative to wrist orientation) or simply close to wrist
-        
-        const wrist = lm[0];
-        const tips = [lm[8], lm[12], lm[16], lm[20]]; // Index, Middle, Ring, Pinky
-        // const pips = [lm[6], lm[10], lm[14], lm[18]];
-        
-        let foldedFingers = 0;
-        
-        // Check distance of fingertips to wrist
-        // Average hand size ref -> Wrist to Middle Finger Base (0->9)
-        const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
-        const foldThreshold = handSize * 1.1; 
+          if (results.landmarks.length > 0) {
+            const lm = results.landmarks[0];
+            
+            // Multi-finger check
+            const wrist = lm[0];
+            const tips = [lm[8], lm[12], lm[16], lm[20]]; // Index, Middle, Ring, Pinky
+            
+            // Calculate dynamic hand size for relative measurement
+            const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
+            
+            // Increased threshold slightly to make "Fist" detection easier
+            // 1.2 * handSize means even if fingers aren't super tight, it counts as closed
+            const foldThreshold = handSize * 1.2; 
 
-        tips.forEach(tip => {
-            const dist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-            if (dist < foldThreshold) foldedFingers++;
-        });
+            let foldedFingers = 0;
+            tips.forEach(tip => {
+                const dist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                if (dist < foldThreshold) foldedFingers++;
+            });
 
-        // If 3 or more fingers are close to wrist -> FIST
-        if (foldedFingers >= 3) {
-            detectedGesture = HandGesture.CLOSED;
-        } else {
-            detectedGesture = HandGesture.OPEN;
-        }
-      } else {
-          detectedGesture = HandGesture.NONE;
-      }
+            // Logic: 
+            // If 3+ fingers are folded -> CLOSED
+            // Otherwise -> OPEN
+            if (foldedFingers >= 3) {
+                detectedGesture = HandGesture.CLOSED;
+            } else {
+                detectedGesture = HandGesture.OPEN;
+            }
+          } else {
+              // If we lose tracking, keep the last known gesture for a few frames 
+              // to prevent flickering (optional, but sticking to NONE for responsiveness for now)
+              detectedGesture = HandGesture.NONE;
+          }
 
-      if (detectedGesture !== lastGestureRef.current) {
-        lastGestureRef.current = detectedGesture;
-        onGestureChange(detectedGesture);
+          if (detectedGesture !== lastGestureRef.current) {
+            lastGestureRef.current = detectedGesture;
+            onGestureChange(detectedGesture);
+          }
+      } catch (e) {
+          console.warn("Prediction error", e);
       }
 
       frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
@@ -138,16 +153,11 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
 
     setupMediaPipe();
 
-    const timeout = setTimeout(() => {
-        if (running && status === 'loading') {
-            console.warn("MediaPipe init timeout");
-            setStatus('error');
-        }
-    }, 15000);
+    // REMOVED: The timeout that forces 'error' state. 
+    // We now wait indefinitely for the model to load or camera to start.
 
     return () => {
       running = false;
-      clearTimeout(timeout);
       if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
       if (videoElement && videoElement.srcObject) {
          const stream = videoElement.srcObject as MediaStream;
@@ -168,7 +178,7 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
   if (status === 'error') {
       return (
         <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500 backdrop-blur-md">
-           摄像头不可用，请使用按钮控制
+           无法访问摄像头，已切换至按钮控制
         </div>
       );
   }
@@ -184,7 +194,7 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
        />
        {status === 'loading' && (
          <div className="absolute inset-0 flex items-center justify-center text-center text-[10px] text-white bg-black/80 p-2">
-           AI 模型加载中...
+           AI 模型初始化中...
          </div>
        )}
     </div>

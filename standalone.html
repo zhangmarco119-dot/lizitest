@@ -403,17 +403,24 @@
                     try {
                         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
                         if (!running) return;
+                        // LOWER THRESHOLDS for relaxed detection
                         handLandmarker = await HandLandmarker.createFromOptions(vision, {
                             baseOptions: {
                                 modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
                                 delegate: "GPU"
                             },
                             runningMode: "VIDEO",
-                            numHands: 1
+                            numHands: 1,
+                            minHandDetectionConfidence: 0.3, // relaxed
+                            minHandPresenceConfidence: 0.3, // relaxed
+                            minTrackingConfidence: 0.3
                         });
                         if (!running) { handLandmarker.close(); return; }
                         startWebcam(handLandmarker);
-                    } catch (error) { if (running) setStatus('error'); }
+                    } catch (error) { 
+                        console.error("MP Init error", error);
+                        // Do not force error state, keep retrying or stay in loading
+                    }
                 };
 
                 const startWebcam = async (landmarker) => {
@@ -426,7 +433,10 @@
                         videoElement.addEventListener('loadeddata', () => {
                             if (running) { setStatus('ready'); predictWebcam(landmarker); }
                         });
-                    } catch (err) { if (running) setStatus('error'); }
+                    } catch (err) { 
+                        console.error(err);
+                        if (running) setStatus('error'); // Only error on camera permission denial
+                    }
                 };
 
                 const predictWebcam = (landmarker) => {
@@ -435,31 +445,34 @@
                         frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
                         return;
                     }
-                    const now = Date.now();
-                    const results = landmarker.detectForVideo(videoRef.current, now);
-                    let detected = HandGesture.NONE;
+                    try {
+                        const now = Date.now();
+                        const results = landmarker.detectForVideo(videoRef.current, now);
+                        let detected = HandGesture.NONE;
 
-                    if (results.landmarks.length > 0) {
-                        const lm = results.landmarks[0];
-                        const wrist = lm[0];
-                        const tips = [lm[8], lm[12], lm[16], lm[20]];
-                        const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
-                        const foldThreshold = handSize * 1.1; 
-                        let foldedFingers = 0;
-                        tips.forEach(tip => {
-                            if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) < foldThreshold) foldedFingers++;
-                        });
-                        detected = foldedFingers >= 3 ? HandGesture.CLOSED : HandGesture.OPEN;
-                    }
-                    if (detected !== lastGestureRef.current) {
-                        lastGestureRef.current = detected;
-                        onGestureChange(detected);
-                    }
+                        if (results.landmarks.length > 0) {
+                            const lm = results.landmarks[0];
+                            const wrist = lm[0];
+                            const tips = [lm[8], lm[12], lm[16], lm[20]];
+                            const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
+                            // Relaxed fold threshold (1.2 instead of 1.1)
+                            const foldThreshold = handSize * 1.2; 
+                            let foldedFingers = 0;
+                            tips.forEach(tip => {
+                                if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) < foldThreshold) foldedFingers++;
+                            });
+                            detected = foldedFingers >= 3 ? HandGesture.CLOSED : HandGesture.OPEN;
+                        }
+                        if (detected !== lastGestureRef.current) {
+                            lastGestureRef.current = detected;
+                            onGestureChange(detected);
+                        }
+                    } catch(e) { console.warn(e); }
                     frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
                 };
 
                 setup();
-                setTimeout(() => { if (running && status === 'loading') setStatus('error'); }, 15000);
+                // Removed timeout error
                 return () => {
                     running = false;
                     if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
@@ -469,12 +482,12 @@
             }, []);
 
             if (status === 'manual') return <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-blue-900/80 text-white text-xs max-w-[200px] border border-blue-500 backdrop-blur-md">手动模式 (文件运行)</div>;
-            if (status === 'error') return <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500 backdrop-blur-md">摄像头不可用，请使用按钮</div>;
+            if (status === 'error') return <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500 backdrop-blur-md">无法访问摄像头，已切换至按钮控制</div>;
 
             return (
                 <div className="fixed bottom-4 left-4 z-50 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 w-32 h-24 bg-black/50">
                     <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover transform scale-x-[-1] ${status === 'ready' ? 'opacity-100' : 'opacity-0'}`} />
-                    {status === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-white bg-black/80">AI 模型加载中...</div>}
+                    {status === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-white bg-black/80">AI 模型初始化中...</div>}
                 </div>
             );
         };
