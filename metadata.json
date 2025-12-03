@@ -1,0 +1,8 @@
+{
+  "name": "Gesture Particle Story",
+  "description": "A 3D interactive particle journey controlled by your hands. Experience Earth, Everest, and personal messages through gesture control.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

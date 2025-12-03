@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Particle Story (Standalone)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+      body { margin: 0; background: #000; color: white; font-family: 'Inter', sans-serif; overflow: hidden; }
+      canvas { display: block; outline: none; }
+    </style>
+
+    <!-- Import Map for External Modules -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "three": "https://esm.sh/three@0.160.0",
+        "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.16?external=react,react-dom,three",
+        "@react-three/drei": "https://esm.sh/@react-three/drei@9.99.0?external=react,react-dom,three,@react-three/fiber",
+        "@mediapipe/tasks-vision": "https://esm.sh/@mediapipe/tasks-vision@0.10.0"
+      }
+    }
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="react,typescript" data-type="module">
+        import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import * as THREE from 'three';
+        import { Canvas, useFrame } from '@react-three/fiber';
+        import { OrbitControls } from '@react-three/drei';
+        import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+
+        // --- CONSTANTS ---
+        const PARTICLE_COUNT = 6000;
+        const TEXT_TO_DISPLAY = "严倩倩";
+        
+        const COLORS = {
+            DEFAULT: '#4f46e5',
+            EARTH: '#3b82f6',
+            EVEREST: '#e2e8f0',
+            NAME: '#fbbf24',
+            HEART: '#ef4444',
+            FIREWORKS: '#ec4899'
+        };
+
+        const AppStage = {
+            INTRO: 'INTRO',
+            EARTH: 'EARTH',
+            EVEREST: 'EVEREST',
+            NAME: 'NAME',
+            HEART: 'HEART',
+            FIREWORKS: 'FIREWORKS'
+        };
+
+        const HandGesture = {
+            NONE: 'NONE',
+            OPEN: 'OPEN',
+            CLOSED: 'CLOSED'
+        };
+
+        const STAGE_ORDER = [
+            AppStage.INTRO,
+            AppStage.EARTH,
+            AppStage.EVEREST,
+            AppStage.NAME,
+            AppStage.HEART,
+            AppStage.FIREWORKS
+        ];
+
+        // --- AUDIO UTILS ---
+        class AudioSynth {
+            constructor() {
+                this.ctx = null;
+                this.masterGain = null;
+                try {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContextClass();
+                    this.masterGain = this.ctx.createGain();
+                    this.masterGain.gain.value = 0.3;
+                    this.masterGain.connect(this.ctx.destination);
+                } catch (e) {
+                    console.warn("Audio context not supported");
+                }
+            }
+
+            resume() {
+                if (this.ctx?.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playConverge() {
+                if (!this.ctx || !this.masterGain) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 1.5);
+                
+                gain.gain.setValueAtTime(0, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.2, this.ctx.currentTime + 0.5);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 2);
+
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                
+                osc.start();
+                osc.stop(this.ctx.currentTime + 2);
+            }
+
+            playDisperse() {
+                if (!this.ctx || !this.masterGain) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 1);
+                
+                const lfo = this.ctx.createOscillator();
+                lfo.frequency.value = 50;
+                const lfoGain = this.ctx.createGain();
+                lfoGain.gain.value = 500;
+                lfo.connect(lfoGain);
+                lfoGain.connect(osc.frequency);
+                lfo.start();
+                lfo.stop(this.ctx.currentTime + 1);
+
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1);
+
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                
+                osc.start();
+                osc.stop(this.ctx.currentTime + 1);
+            }
+        }
+        const audioManager = new AudioSynth();
+
+        // --- SHAPE UTILS ---
+        const generateSphere = (count, radius) => {
+            const positions = new Float32Array(count * 3);
+            const phi = Math.PI * (3 - Math.sqrt(5)); 
+            for (let i = 0; i < count; i++) {
+                const y = 1 - (i / (count - 1)) * 2; 
+                const radiusAtY = Math.sqrt(1 - y * y);
+                const theta = phi * i;
+                const x = Math.cos(theta) * radiusAtY;
+                const z = Math.sin(theta) * radiusAtY;
+                positions[i * 3] = x * radius;
+                positions[i * 3 + 1] = y * radius;
+                positions[i * 3 + 2] = z * radius;
+            }
+            return positions;
+        };
+
+        const generateEverest = (count) => {
+            const positions = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.sqrt(Math.random()) * 8; 
+                const height = 8 - r + (Math.random() - 0.5) * 2; 
+                positions[i * 3] = Math.cos(angle) * r;
+                positions[i * 3 + 1] = (height * 0.6) - 3; 
+                positions[i * 3 + 2] = Math.sin(angle) * r;
+            }
+            return positions;
+        };
+
+        const generateHeart = (count) => {
+            const positions = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const t = Math.random() * Math.PI * 2;
+                const scale = 0.25;
+                let x = 16 * Math.pow(Math.sin(t), 3);
+                let y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+                const z = (Math.random() - 0.5) * 4;
+                positions[i * 3] = x * scale;
+                positions[i * 3 + 1] = y * scale;
+                positions[i * 3 + 2] = z;
+            }
+            return positions;
+        };
+
+        const generateText = (count) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const size = 256;
+            canvas.width = size;
+            canvas.height = size;
+            if (!ctx) return new Float32Array(count * 3);
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 80px "Microsoft YaHei", "SimHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(TEXT_TO_DISPLAY, size / 2, size / 2);
+
+            const imageData = ctx.getImageData(0, 0, size, size);
+            const data = imageData.data;
+            const validPixels = [];
+
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i] > 128) { 
+                    const idx = i / 4;
+                    const x = (idx % size) - size / 2;
+                    const y = size / 2 - Math.floor(idx / size);
+                    validPixels.push(x, y);
+                }
+            }
+
+            const positions = new Float32Array(count * 3);
+            if (validPixels.length === 0) return positions;
+
+            for (let i = 0; i < count; i++) {
+                const randomIdx = Math.floor(Math.random() * (validPixels.length / 2)) * 2;
+                positions[i * 3] = validPixels[randomIdx] * 0.08; 
+                positions[i * 3 + 1] = validPixels[randomIdx + 1] * 0.08;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 1; 
+            }
+            return positions;
+        };
+
+        const generateRandom = (count) => {
+            const positions = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                positions[i * 3] = (Math.random() - 0.5) * 30;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 30;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 30;
+            }
+            return positions;
+        };
+
+        // --- COMPONENTS ---
+        
+        const ParticleScene = ({ stage, gesture, color }) => {
+            const pointsRef = useRef(null);
+            const currentPositions = useRef(new Float32Array(PARTICLE_COUNT * 3));
+            const targetPositions = useRef(new Float32Array(PARTICLE_COUNT * 3));
+            
+            const shapes = useMemo(() => ({
+                [AppStage.INTRO]: generateRandom(PARTICLE_COUNT),
+                [AppStage.EARTH]: generateSphere(PARTICLE_COUNT, 4),
+                [AppStage.EVEREST]: generateEverest(PARTICLE_COUNT),
+                [AppStage.NAME]: generateText(PARTICLE_COUNT),
+                [AppStage.HEART]: generateHeart(PARTICLE_COUNT),
+                [AppStage.FIREWORKS]: generateRandom(PARTICLE_COUNT),
+            }), []);
+
+            useEffect(() => {
+                const shape = shapes[stage];
+                targetPositions.current.set(shape);
+                if (stage === AppStage.FIREWORKS) audioManager.playDisperse();
+            }, [stage, shapes]);
+
+            useEffect(() => {
+                if (gesture === HandGesture.CLOSED) audioManager.playConverge();
+                else if (gesture === HandGesture.OPEN && stage !== AppStage.INTRO) audioManager.playDisperse();
+            }, [gesture, stage]);
+
+            useFrame((state, delta) => {
+                if (!pointsRef.current) return;
+                const positions = pointsRef.current.geometry.attributes.position.array;
+                const target = targetPositions.current;
+                
+                const isAggregating = gesture === HandGesture.CLOSED;
+                const isExploding = stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN;
+                const speed = isAggregating ? 4.0 : 2.0;
+
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    const px = positions[i * 3];
+                    const py = positions[i * 3 + 1];
+                    const pz = positions[i * 3 + 2];
+                    let tx = target[i * 3];
+                    let ty = target[i * 3 + 1];
+                    let tz = target[i * 3 + 2];
+
+                    if (!isAggregating) {
+                        if (stage === AppStage.FIREWORKS || stage === AppStage.INTRO) {
+                            tx = px + (Math.random() - 0.5) * 0.1;
+                            ty = py + (Math.random() - 0.5) * 0.1;
+                            tz = pz + (Math.random() - 0.5) * 0.1;
+                        } else {
+                            tx = tx * 1.5;
+                            ty = ty * 1.5;
+                            tz = tz * 1.5;
+                        }
+                    }
+
+                    if (isExploding) {
+                        tx = px * 1.05 + (Math.random() - 0.5);
+                        ty = py * 1.05 + (Math.random() - 0.5);
+                        tz = pz * 1.05 + (Math.random() - 0.5);
+                    }
+
+                    positions[i * 3] += (tx - px) * speed * delta;
+                    positions[i * 3 + 1] += (ty - py) * speed * delta;
+                    positions[i * 3 + 2] += (tz - pz) * speed * delta;
+
+                    if (isAggregating && stage === AppStage.EARTH) {
+                        const x = positions[i*3];
+                        const z = positions[i*3+2];
+                        const rotSpeed = 0.5 * delta;
+                        positions[i*3] = x * Math.cos(rotSpeed) - z * Math.sin(rotSpeed);
+                        positions[i*3+2] = x * Math.sin(rotSpeed) + z * Math.cos(rotSpeed);
+                    }
+                }
+                pointsRef.current.geometry.attributes.position.needsUpdate = true;
+                if (!isAggregating) pointsRef.current.rotation.y += 0.05 * delta;
+            });
+
+            return (
+                <points ref={pointsRef}>
+                    <bufferGeometry>
+                        <bufferAttribute attach="attributes-position" count={PARTICLE_COUNT} array={currentPositions.current} itemSize={3} />
+                    </bufferGeometry>
+                    <pointsMaterial size={0.08} color={color} transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} />
+                </points>
+            );
+        };
+
+        const HandDetector = ({ onGestureChange }) => {
+            const videoRef = useRef(null);
+            const [status, setStatus] = useState('loading');
+            const lastGestureRef = useRef(HandGesture.NONE);
+            const frameIdRef = useRef(0);
+
+            useEffect(() => {
+                let handLandmarker = null;
+                let running = true;
+                let videoElement = null;
+
+                const setup = async () => {
+                    try {
+                        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+                        if (!running) return;
+                        
+                        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                            baseOptions: {
+                                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                                delegate: "GPU"
+                            },
+                            runningMode: "VIDEO",
+                            numHands: 2
+                        });
+
+                        if (!running) { handLandmarker.close(); return; }
+                        startWebcam(handLandmarker);
+                    } catch (error) {
+                        console.error(error);
+                        if (running) setStatus('error');
+                    }
+                };
+
+                const startWebcam = async (landmarker) => {
+                    if (!videoRef.current) return;
+                    videoElement = videoRef.current;
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        if (!running) { stream.getTracks().forEach(t => t.stop()); return; }
+                        videoElement.srcObject = stream;
+                        videoElement.addEventListener('loadeddata', () => {
+                            if (running) {
+                                setStatus('ready');
+                                predictWebcam(landmarker);
+                            }
+                        });
+                    } catch (err) {
+                        if (running) setStatus('error');
+                    }
+                };
+
+                const predictWebcam = (landmarker) => {
+                    if (!running || !videoRef.current) return;
+                    if (videoRef.current.videoWidth === 0) {
+                        frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
+                        return;
+                    }
+                    const now = Date.now();
+                    const results = landmarker.detectForVideo(videoRef.current, now);
+                    let detected = HandGesture.NONE;
+
+                    if (results.landmarks.length > 0) {
+                        const lm = results.landmarks[0];
+                        const wrist = lm[0];
+                        const tip = lm[12];
+                        const base = lm[9];
+                        const dTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                        const dBase = Math.hypot(base.x - wrist.x, base.y - wrist.y);
+                        detected = dTip < dBase * 1.2 ? HandGesture.CLOSED : HandGesture.OPEN;
+                    }
+
+                    if (detected !== lastGestureRef.current) {
+                        lastGestureRef.current = detected;
+                        onGestureChange(detected);
+                    }
+                    frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
+                };
+
+                setup();
+                
+                // Fallback timeout
+                setTimeout(() => {
+                   if (running && status === 'loading') setStatus('error'); 
+                }, 10000);
+
+                return () => {
+                    running = false;
+                    if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
+                    if (videoElement?.srcObject) videoElement.srcObject.getTracks().forEach(t => t.stop());
+                    if (handLandmarker) handLandmarker.close();
+                };
+            }, []);
+
+            if (status === 'error') {
+                return (
+                    <div className="fixed bottom-4 left-4 z-50 rounded-xl p-4 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500">
+                        Camera unavailable (File Mode?). Use buttons.
+                    </div>
+                );
+            }
+
+            return (
+                <div className="fixed bottom-4 left-4 z-50 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 w-32 h-24 bg-black/50">
+                    <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover transform scale-x-[-1] ${status === 'ready' ? 'opacity-100' : 'opacity-0'}`} />
+                    {status === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-white bg-black/80">Loading AI...</div>}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [currentStageIndex, setCurrentStageIndex] = useState(0);
+            const [gesture, setGesture] = useState(HandGesture.NONE);
+            const [particleColor, setParticleColor] = useState(COLORS.DEFAULT);
+            const [hasStarted, setHasStarted] = useState(false);
+            const prevGesture = useRef(HandGesture.NONE);
+
+            const startExperience = useCallback(() => {
+                if (!hasStarted) {
+                    setHasStarted(true);
+                    audioManager.resume();
+                    setCurrentStageIndex(1);
+                    setParticleColor(COLORS.EARTH);
+                }
+            }, [hasStarted]);
+
+            const handleGestureChange = useCallback((newGesture) => {
+                setGesture(newGesture);
+                if (newGesture === HandGesture.CLOSED && !hasStarted) startExperience();
+            }, [hasStarted, startExperience]);
+
+            useEffect(() => {
+                if (!hasStarted) {
+                    prevGesture.current = gesture;
+                    return;
+                }
+                if (prevGesture.current === HandGesture.OPEN && gesture === HandGesture.CLOSED) {
+                    setCurrentStageIndex(prev => {
+                        const next = prev + 1;
+                        const nextIndex = next >= STAGE_ORDER.length ? 1 : next;
+                        const stage = STAGE_ORDER[nextIndex];
+                        switch(stage) {
+                            case AppStage.EARTH: setParticleColor(COLORS.EARTH); break;
+                            case AppStage.EVEREST: setParticleColor(COLORS.EVEREST); break;
+                            case AppStage.NAME: setParticleColor(COLORS.NAME); break;
+                            case AppStage.HEART: setParticleColor(COLORS.HEART); break;
+                            case AppStage.FIREWORKS: setParticleColor(COLORS.FIREWORKS); break;
+                        }
+                        return nextIndex;
+                    });
+                }
+                prevGesture.current = gesture;
+            }, [gesture, hasStarted]);
+
+            const getInstructions = () => {
+                if (!hasStarted) return "Make a Fist ✊ or Click Start";
+                const stage = STAGE_ORDER[currentStageIndex];
+                if (stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN) return "Explosion!";
+                if (gesture === HandGesture.CLOSED) return "Keep closed to form shape...";
+                if (gesture === HandGesture.OPEN) return "Make a Fist ✊ to morph next";
+                return "Show hand to camera";
+            };
+
+            const getTitle = () => {
+                const stage = STAGE_ORDER[currentStageIndex];
+                switch(stage) {
+                    case AppStage.INTRO: return "Gesture Particles";
+                    case AppStage.EARTH: return "Planet Earth";
+                    case AppStage.EVEREST: return "Mt. Everest";
+                    case AppStage.NAME: return "Yan Qianqian";
+                    case AppStage.HEART: return "Love";
+                    case AppStage.FIREWORKS: return "Celebration";
+                    default: return "";
+                }
+            };
+
+            return (
+                <div className="relative w-full h-screen bg-black overflow-hidden select-none">
+                    <Canvas camera={{ position: [0, 0, 12], fov: 60 }} dpr={[1, 2]}>
+                        <color attach="background" args={['#050505']} />
+                        <ambientLight intensity={0.5} />
+                        <ParticleScene stage={STAGE_ORDER[currentStageIndex]} gesture={gesture} color={particleColor} />
+                        <OrbitControls enableZoom={false} enablePan={false} autoRotate={!hasStarted} autoRotateSpeed={0.5} />
+                    </Canvas>
+                    
+                    <div className="absolute top-0 left-0 w-full p-6 flex flex-col md:flex-row justify-between items-start pointer-events-none z-10">
+                        <div className="flex flex-col space-y-2 mb-4 md:mb-0">
+                            <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 drop-shadow-lg">{getTitle()}</h1>
+                            <p className="text-blue-200 text-lg md:text-xl font-mono animate-pulse">{getInstructions()}</p>
+                        </div>
+                        <div className="pointer-events-auto bg-black/40 backdrop-blur-md p-4 rounded-xl border border-white/10 flex flex-col gap-4 w-64">
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-gray-400 uppercase font-semibold tracking-wider">Particle Color</label>
+                                <div className="flex items-center gap-2">
+                                    <input type="color" value={particleColor} onChange={(e) => setParticleColor(e.target.value)} className="w-8 h-8 cursor-pointer rounded border-none bg-transparent" />
+                                    <span className="text-xs text-gray-300 font-mono">{particleColor}</span>
+                                </div>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label className="text-xs text-gray-400 uppercase font-semibold tracking-wider">Manual Controls</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onMouseDown={() => handleGestureChange(HandGesture.CLOSED)} onMouseUp={() => handleGestureChange(HandGesture.OPEN)} onTouchStart={() => handleGestureChange(HandGesture.CLOSED)} onTouchEnd={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-3 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg font-bold text-xs transition-all active:scale-95 shadow-lg border border-blue-400/30 touch-manipulation">HOLD (Fist)</button>
+                                    <button onClick={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-3 bg-gray-700/80 hover:bg-gray-600 text-white rounded-lg font-bold text-xs transition-all active:scale-95 border border-white/10 touch-manipulation">RELEASE</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <HandDetector onGestureChange={handleGestureChange} />
+
+                    {!hasStarted && (
+                        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                            <div className="text-center space-y-8 p-8 max-w-lg bg-black/80 rounded-2xl border border-white/10 shadow-2xl mx-4">
+                                <div className="text-7xl animate-bounce">👋</div>
+                                <h2 className="text-3xl font-bold text-white tracking-tight">Particle Story</h2>
+                                <button onClick={startExperience} className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xl rounded-xl transition-all transform hover:scale-105 shadow-xl">Start Experience</button>
+                                <p className="text-xs text-gray-500">Camera not required in manual mode.</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
