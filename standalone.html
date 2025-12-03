@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gesture Particle Story (Standalone)</title>
+    <title>手势粒子交互 - 严倩倩</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
-    <!-- Babel for in-browser JSX compilation -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
@@ -14,7 +13,6 @@
       canvas { display: block; outline: none; }
     </style>
 
-    <!-- Import Map for External Modules -->
     <script type="importmap">
     {
       "imports": {
@@ -40,16 +38,16 @@
         import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
         // --- CONSTANTS ---
-        const PARTICLE_COUNT = 6000;
+        const PARTICLE_COUNT = 12000;
         const TEXT_TO_DISPLAY = "严倩倩";
         
         const COLORS = {
-            DEFAULT: '#4f46e5',
+            DEFAULT: '#6366f1',
             EARTH: '#3b82f6',
             EVEREST: '#e2e8f0',
             NAME: '#fbbf24',
             HEART: '#ef4444',
-            FIREWORKS: '#ec4899'
+            FIREWORKS: '#f472b6'
         };
 
         const AppStage = {
@@ -76,7 +74,7 @@
             AppStage.FIREWORKS
         ];
 
-        // --- AUDIO UTILS ---
+        // --- AUDIO UTILS (Updated Sci-Fi) ---
         class AudioSynth {
             constructor() {
                 this.ctx = null;
@@ -85,70 +83,100 @@
                     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                     this.ctx = new AudioContextClass();
                     this.masterGain = this.ctx.createGain();
-                    this.masterGain.gain.value = 0.3;
+                    this.masterGain.gain.value = 0.4;
                     this.masterGain.connect(this.ctx.destination);
-                } catch (e) {
-                    console.warn("Audio context not supported");
-                }
+                } catch (e) { console.warn("Audio context not supported"); }
             }
 
             resume() {
-                if (this.ctx?.state === 'suspended') {
-                    this.ctx.resume();
-                }
+                if (this.ctx?.state === 'suspended') this.ctx.resume();
             }
 
             playConverge() {
                 if (!this.ctx || !this.masterGain) return;
+                const t = this.ctx.currentTime;
                 const osc = this.ctx.createOscillator();
+                const mod = this.ctx.createOscillator();
+                const modGain = this.ctx.createGain();
                 const gain = this.ctx.createGain();
-                
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 1.5);
-                
-                gain.gain.setValueAtTime(0, this.ctx.currentTime);
-                gain.gain.linearRampToValueAtTime(0.2, this.ctx.currentTime + 0.5);
-                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 2);
+                const filter = this.ctx.createBiquadFilter();
 
-                osc.connect(gain);
-                gain.connect(this.masterGain);
+                osc.type = 'sawtooth';
+                mod.type = 'sine';
                 
-                osc.start();
-                osc.stop(this.ctx.currentTime + 2);
+                osc.frequency.setValueAtTime(80, t);
+                osc.frequency.exponentialRampToValueAtTime(400, t + 1.5);
+
+                mod.frequency.setValueAtTime(20, t);
+                mod.frequency.linearRampToValueAtTime(100, t + 1.5);
+                modGain.gain.setValueAtTime(100, t);
+                modGain.gain.linearRampToValueAtTime(500, t + 1.5);
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(200, t);
+                filter.frequency.exponentialRampToValueAtTime(2000, t + 1.5);
+
+                gain.gain.setValueAtTime(0, t);
+                gain.gain.linearRampToValueAtTime(0.3, t + 0.5);
+                gain.gain.setValueAtTime(0.3, t + 1.0);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 2.0);
+
+                mod.connect(modGain);
+                modGain.connect(osc.frequency);
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.masterGain);
+
+                osc.start(t);
+                mod.start(t);
+                osc.stop(t + 2.0);
+                mod.stop(t + 2.0);
             }
 
             playDisperse() {
                 if (!this.ctx || !this.masterGain) return;
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 1);
-                
-                const lfo = this.ctx.createOscillator();
-                lfo.frequency.value = 50;
-                const lfoGain = this.ctx.createGain();
-                lfoGain.gain.value = 500;
-                lfo.connect(lfoGain);
-                lfoGain.connect(osc.frequency);
-                lfo.start();
-                lfo.stop(this.ctx.currentTime + 1);
+                const t = this.ctx.currentTime;
+                const osc1 = this.ctx.createOscillator();
+                const gain1 = this.ctx.createGain();
+                osc1.frequency.setValueAtTime(150, t);
+                osc1.frequency.exponentialRampToValueAtTime(40, t + 0.5);
+                gain1.gain.setValueAtTime(0.5, t);
+                gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
+                osc1.connect(gain1);
+                gain1.connect(this.masterGain);
 
-                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1);
-
-                osc.connect(gain);
-                gain.connect(this.masterGain);
+                const osc2 = this.ctx.createOscillator();
+                const gain2 = this.ctx.createGain();
+                const filter = this.ctx.createBiquadFilter();
                 
-                osc.start();
-                osc.stop(this.ctx.currentTime + 1);
+                osc2.type = 'sawtooth';
+                osc2.frequency.setValueAtTime(800, t);
+                osc2.frequency.exponentialRampToValueAtTime(100, t + 0.4);
+                
+                filter.type = 'highpass';
+                filter.frequency.setValueAtTime(500, t);
+                filter.frequency.linearRampToValueAtTime(100, t + 0.4);
+
+                gain2.gain.setValueAtTime(0.2, t);
+                gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+
+                osc2.connect(filter);
+                filter.connect(gain2);
+                gain2.connect(this.masterGain);
+
+                osc1.start(t);
+                osc2.start(t);
+                osc1.stop(t + 1);
+                osc2.stop(t + 1);
             }
         }
         const audioManager = new AudioSynth();
 
-        // --- SHAPE UTILS ---
+        // --- SHAPES ---
+        function noise(x, y, z) {
+            return Math.sin(x * 10) * Math.cos(y * 10) * Math.sin(z * 10);
+        }
+
         const generateSphere = (count, radius) => {
             const positions = new Float32Array(count * 3);
             const phi = Math.PI * (3 - Math.sqrt(5)); 
@@ -156,11 +184,13 @@
                 const y = 1 - (i / (count - 1)) * 2; 
                 const radiusAtY = Math.sqrt(1 - y * y);
                 const theta = phi * i;
-                const x = Math.cos(theta) * radiusAtY;
-                const z = Math.sin(theta) * radiusAtY;
-                positions[i * 3] = x * radius;
-                positions[i * 3 + 1] = y * radius;
-                positions[i * 3 + 2] = z * radius;
+                let x = Math.cos(theta) * radiusAtY;
+                let z = Math.sin(theta) * radiusAtY;
+                const n = Math.abs(noise(x, y, z));
+                const r = radius + (n > 0.5 ? n * 0.5 : 0);
+                positions[i * 3] = x * r;
+                positions[i * 3 + 1] = y * r;
+                positions[i * 3 + 2] = z * r;
             }
             return positions;
         };
@@ -169,10 +199,11 @@
             const positions = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) {
                 const angle = Math.random() * Math.PI * 2;
-                const r = Math.sqrt(Math.random()) * 8; 
-                const height = 8 - r + (Math.random() - 0.5) * 2; 
+                const r = Math.sqrt(Math.random()) * 9; 
+                let height = 10 * Math.exp(-r * 0.4) - 4;
+                height += (Math.random() - 0.5) * 1.5;
                 positions[i * 3] = Math.cos(angle) * r;
-                positions[i * 3 + 1] = (height * 0.6) - 3; 
+                positions[i * 3 + 1] = height; 
                 positions[i * 3 + 2] = Math.sin(angle) * r;
             }
             return positions;
@@ -182,12 +213,14 @@
             const positions = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) {
                 const t = Math.random() * Math.PI * 2;
-                const scale = 0.25;
                 let x = 16 * Math.pow(Math.sin(t), 3);
                 let y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-                const z = (Math.random() - 0.5) * 4;
-                positions[i * 3] = x * scale;
-                positions[i * 3 + 1] = y * scale;
+                const scale = 0.2;
+                x *= scale; y *= scale;
+                const zScale = Math.abs(x) * 0.5 + 1;
+                const z = (Math.random() - 0.5) * 2 * zScale;
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y + 1;
                 positions[i * 3 + 2] = z;
             }
             return positions;
@@ -196,7 +229,7 @@
         const generateText = (count) => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            const size = 256;
+            const size = 512;
             canvas.width = size;
             canvas.height = size;
             if (!ctx) return new Float32Array(count * 3);
@@ -204,7 +237,7 @@
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, size, size);
             ctx.fillStyle = 'white';
-            ctx.font = 'bold 80px "Microsoft YaHei", "SimHei", sans-serif';
+            ctx.font = 'bold 160px "Microsoft YaHei", "SimHei", sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(TEXT_TO_DISPLAY, size / 2, size / 2);
@@ -212,9 +245,8 @@
             const imageData = ctx.getImageData(0, 0, size, size);
             const data = imageData.data;
             const validPixels = [];
-
             for (let i = 0; i < data.length; i += 4) {
-                if (data[i] > 128) { 
+                if (data[i] > 100) { 
                     const idx = i / 4;
                     const x = (idx % size) - size / 2;
                     const y = size / 2 - Math.floor(idx / size);
@@ -224,12 +256,12 @@
 
             const positions = new Float32Array(count * 3);
             if (validPixels.length === 0) return positions;
-
             for (let i = 0; i < count; i++) {
                 const randomIdx = Math.floor(Math.random() * (validPixels.length / 2)) * 2;
-                positions[i * 3] = validPixels[randomIdx] * 0.08; 
-                positions[i * 3 + 1] = validPixels[randomIdx + 1] * 0.08;
-                positions[i * 3 + 2] = (Math.random() - 0.5) * 1; 
+                const scale = 0.04;
+                positions[i * 3] = validPixels[randomIdx] * scale;
+                positions[i * 3 + 1] = validPixels[randomIdx + 1] * scale;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 0.5; 
             }
             return positions;
         };
@@ -237,19 +269,20 @@
         const generateRandom = (count) => {
             const positions = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) {
-                positions[i * 3] = (Math.random() - 0.5) * 30;
-                positions[i * 3 + 1] = (Math.random() - 0.5) * 30;
-                positions[i * 3 + 2] = (Math.random() - 0.5) * 30;
+                positions[i * 3] = (Math.random() - 0.5) * 40;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 40;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
             }
             return positions;
         };
 
-        // --- COMPONENTS ---
-        
+        // --- PARTICLE SCENE ---
         const ParticleScene = ({ stage, gesture, color }) => {
             const pointsRef = useRef(null);
+            const [explosionTime, setExplosionTime] = useState(0);
             const currentPositions = useRef(new Float32Array(PARTICLE_COUNT * 3));
             const targetPositions = useRef(new Float32Array(PARTICLE_COUNT * 3));
+            const velocities = useRef(new Float32Array(PARTICLE_COUNT * 3));
             
             const shapes = useMemo(() => ({
                 [AppStage.INTRO]: generateRandom(PARTICLE_COUNT),
@@ -261,61 +294,83 @@
             }), []);
 
             useEffect(() => {
-                const shape = shapes[stage];
-                targetPositions.current.set(shape);
-                if (stage === AppStage.FIREWORKS) audioManager.playDisperse();
+                if (stage !== AppStage.FIREWORKS) {
+                    targetPositions.current.set(shapes[stage]);
+                }
             }, [stage, shapes]);
 
             useEffect(() => {
                 if (gesture === HandGesture.CLOSED) audioManager.playConverge();
-                else if (gesture === HandGesture.OPEN && stage !== AppStage.INTRO) audioManager.playDisperse();
+                else if (gesture === HandGesture.OPEN && stage !== AppStage.INTRO) {
+                    audioManager.playDisperse();
+                    if (stage === AppStage.FIREWORKS) {
+                        setExplosionTime(Date.now());
+                        for(let i=0; i<PARTICLE_COUNT; i++) {
+                            velocities.current[i*3] = (Math.random() - 0.5) * 0.5;
+                            velocities.current[i*3+1] = 5 + Math.random() * 5;
+                            velocities.current[i*3+2] = (Math.random() - 0.5) * 0.5;
+                        }
+                    }
+                }
             }, [gesture, stage]);
 
             useFrame((state, delta) => {
                 if (!pointsRef.current) return;
                 const positions = pointsRef.current.geometry.attributes.position.array;
                 const target = targetPositions.current;
-                
                 const isAggregating = gesture === HandGesture.CLOSED;
-                const isExploding = stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN;
-                const speed = isAggregating ? 4.0 : 2.0;
+                const isFireworks = stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN;
+                const speed = isAggregating ? 4.0 : 2.5;
 
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    const px = positions[i * 3];
-                    const py = positions[i * 3 + 1];
-                    const pz = positions[i * 3 + 2];
-                    let tx = target[i * 3];
-                    let ty = target[i * 3 + 1];
-                    let tz = target[i * 3 + 2];
-
-                    if (!isAggregating) {
-                        if (stage === AppStage.FIREWORKS || stage === AppStage.INTRO) {
-                            tx = px + (Math.random() - 0.5) * 0.1;
-                            ty = py + (Math.random() - 0.5) * 0.1;
-                            tz = pz + (Math.random() - 0.5) * 0.1;
+                if (isFireworks) {
+                    const timeSinceExplosion = (Date.now() - explosionTime) / 1000;
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        let vx = velocities.current[i*3];
+                        let vy = velocities.current[i*3+1];
+                        let vz = velocities.current[i*3+2];
+                        if (timeSinceExplosion < 0.6) {
+                            positions[i*3] += vx * delta;
+                            positions[i*3+1] += vy * delta;
+                            positions[i*3+2] += vz * delta;
                         } else {
-                            tx = tx * 1.5;
-                            ty = ty * 1.5;
-                            tz = tz * 1.5;
+                            vy -= 9.8 * delta * 0.5;
+                            if (timeSinceExplosion < 0.7) { vx *= 1.1; vz *= 1.1; vy *= 0.5; }
+                            velocities.current[i*3+1] = vy;
+                            positions[i*3] += vx * delta * 2;
+                            positions[i*3+1] += vy * delta;
+                            positions[i*3+2] += vz * delta * 2;
                         }
+                        if (positions[i*3+1] < -10) positions[i*3+1] = -10;
                     }
+                } else {
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        const px = positions[i * 3];
+                        const py = positions[i * 3 + 1];
+                        const pz = positions[i * 3 + 2];
+                        let tx = target[i * 3];
+                        let ty = target[i * 3 + 1];
+                        let tz = target[i * 3 + 2];
 
-                    if (isExploding) {
-                        tx = px * 1.05 + (Math.random() - 0.5);
-                        ty = py * 1.05 + (Math.random() - 0.5);
-                        tz = pz * 1.05 + (Math.random() - 0.5);
-                    }
+                        if (!isAggregating) {
+                            if (stage === AppStage.INTRO) {
+                                tx = px + (Math.random() - 0.5) * 0.1;
+                                ty = py + (Math.random() - 0.5) * 0.1;
+                                tz = pz + (Math.random() - 0.5) * 0.1;
+                            } else {
+                                tx = tx * 2; ty = ty * 2; tz = tz * 2;
+                            }
+                        }
+                        positions[i * 3] += (tx - px) * speed * delta;
+                        positions[i * 3 + 1] += (ty - py) * speed * delta;
+                        positions[i * 3 + 2] += (tz - pz) * speed * delta;
 
-                    positions[i * 3] += (tx - px) * speed * delta;
-                    positions[i * 3 + 1] += (ty - py) * speed * delta;
-                    positions[i * 3 + 2] += (tz - pz) * speed * delta;
-
-                    if (isAggregating && stage === AppStage.EARTH) {
-                        const x = positions[i*3];
-                        const z = positions[i*3+2];
-                        const rotSpeed = 0.5 * delta;
-                        positions[i*3] = x * Math.cos(rotSpeed) - z * Math.sin(rotSpeed);
-                        positions[i*3+2] = x * Math.sin(rotSpeed) + z * Math.cos(rotSpeed);
+                        if (stage === AppStage.EARTH && isAggregating) {
+                            const x = positions[i*3];
+                            const z = positions[i*3+2];
+                            const rotSpeed = 0.5 * delta;
+                            positions[i*3] = x * Math.cos(rotSpeed) - z * Math.sin(rotSpeed);
+                            positions[i*3+2] = x * Math.sin(rotSpeed) + z * Math.cos(rotSpeed);
+                        }
                     }
                 }
                 pointsRef.current.geometry.attributes.position.needsUpdate = true;
@@ -327,7 +382,7 @@
                     <bufferGeometry>
                         <bufferAttribute attach="attributes-position" count={PARTICLE_COUNT} array={currentPositions.current} itemSize={3} />
                     </bufferGeometry>
-                    <pointsMaterial size={0.08} color={color} transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} />
+                    <pointsMaterial size={0.06} color={color} transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} />
                 </points>
             );
         };
@@ -339,6 +394,7 @@
             const frameIdRef = useRef(0);
 
             useEffect(() => {
+                if (window.location.protocol === 'file:') { setStatus('manual'); return; }
                 let handLandmarker = null;
                 let running = true;
                 let videoElement = null;
@@ -347,40 +403,30 @@
                     try {
                         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
                         if (!running) return;
-                        
                         handLandmarker = await HandLandmarker.createFromOptions(vision, {
                             baseOptions: {
                                 modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
                                 delegate: "GPU"
                             },
                             runningMode: "VIDEO",
-                            numHands: 2
+                            numHands: 1
                         });
-
                         if (!running) { handLandmarker.close(); return; }
                         startWebcam(handLandmarker);
-                    } catch (error) {
-                        console.error(error);
-                        if (running) setStatus('error');
-                    }
+                    } catch (error) { if (running) setStatus('error'); }
                 };
 
                 const startWebcam = async (landmarker) => {
                     if (!videoRef.current) return;
                     videoElement = videoRef.current;
                     try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
                         if (!running) { stream.getTracks().forEach(t => t.stop()); return; }
                         videoElement.srcObject = stream;
                         videoElement.addEventListener('loadeddata', () => {
-                            if (running) {
-                                setStatus('ready');
-                                predictWebcam(landmarker);
-                            }
+                            if (running) { setStatus('ready'); predictWebcam(landmarker); }
                         });
-                    } catch (err) {
-                        if (running) setStatus('error');
-                    }
+                    } catch (err) { if (running) setStatus('error'); }
                 };
 
                 const predictWebcam = (landmarker) => {
@@ -396,13 +442,15 @@
                     if (results.landmarks.length > 0) {
                         const lm = results.landmarks[0];
                         const wrist = lm[0];
-                        const tip = lm[12];
-                        const base = lm[9];
-                        const dTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-                        const dBase = Math.hypot(base.x - wrist.x, base.y - wrist.y);
-                        detected = dTip < dBase * 1.2 ? HandGesture.CLOSED : HandGesture.OPEN;
+                        const tips = [lm[8], lm[12], lm[16], lm[20]];
+                        const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
+                        const foldThreshold = handSize * 1.1; 
+                        let foldedFingers = 0;
+                        tips.forEach(tip => {
+                            if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) < foldThreshold) foldedFingers++;
+                        });
+                        detected = foldedFingers >= 3 ? HandGesture.CLOSED : HandGesture.OPEN;
                     }
-
                     if (detected !== lastGestureRef.current) {
                         lastGestureRef.current = detected;
                         onGestureChange(detected);
@@ -411,12 +459,7 @@
                 };
 
                 setup();
-                
-                // Fallback timeout
-                setTimeout(() => {
-                   if (running && status === 'loading') setStatus('error'); 
-                }, 10000);
-
+                setTimeout(() => { if (running && status === 'loading') setStatus('error'); }, 15000);
                 return () => {
                     running = false;
                     if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
@@ -425,18 +468,13 @@
                 };
             }, []);
 
-            if (status === 'error') {
-                return (
-                    <div className="fixed bottom-4 left-4 z-50 rounded-xl p-4 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500">
-                        Camera unavailable (File Mode?). Use buttons.
-                    </div>
-                );
-            }
+            if (status === 'manual') return <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-blue-900/80 text-white text-xs max-w-[200px] border border-blue-500 backdrop-blur-md">手动模式 (文件运行)</div>;
+            if (status === 'error') return <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500 backdrop-blur-md">摄像头不可用，请使用按钮</div>;
 
             return (
                 <div className="fixed bottom-4 left-4 z-50 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 w-32 h-24 bg-black/50">
                     <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover transform scale-x-[-1] ${status === 'ready' ? 'opacity-100' : 'opacity-0'}`} />
-                    {status === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-white bg-black/80">Loading AI...</div>}
+                    {status === 'loading' && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-white bg-black/80">AI 模型加载中...</div>}
                 </div>
             );
         };
@@ -463,10 +501,7 @@
             }, [hasStarted, startExperience]);
 
             useEffect(() => {
-                if (!hasStarted) {
-                    prevGesture.current = gesture;
-                    return;
-                }
+                if (!hasStarted) { prevGesture.current = gesture; return; }
                 if (prevGesture.current === HandGesture.OPEN && gesture === HandGesture.CLOSED) {
                     setCurrentStageIndex(prev => {
                         const next = prev + 1;
@@ -486,31 +521,31 @@
             }, [gesture, hasStarted]);
 
             const getInstructions = () => {
-                if (!hasStarted) return "Make a Fist ✊ or Click Start";
+                if (!hasStarted) return "握拳 ✊ 或点击开始";
                 const stage = STAGE_ORDER[currentStageIndex];
-                if (stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN) return "Explosion!";
-                if (gesture === HandGesture.CLOSED) return "Keep closed to form shape...";
-                if (gesture === HandGesture.OPEN) return "Make a Fist ✊ to morph next";
-                return "Show hand to camera";
+                if (stage === AppStage.FIREWORKS && gesture === HandGesture.OPEN) return "烟花绽放！";
+                if (gesture === HandGesture.CLOSED) return "保持握拳，凝聚形状...";
+                if (gesture === HandGesture.OPEN) return "握拳 ✊ 进入下一幕";
+                return "请将手放入摄像头视野";
             };
 
             const getTitle = () => {
                 const stage = STAGE_ORDER[currentStageIndex];
                 switch(stage) {
-                    case AppStage.INTRO: return "Gesture Particles";
-                    case AppStage.EARTH: return "Planet Earth";
-                    case AppStage.EVEREST: return "Mt. Everest";
-                    case AppStage.NAME: return "Yan Qianqian";
-                    case AppStage.HEART: return "Love";
-                    case AppStage.FIREWORKS: return "Celebration";
+                    case AppStage.INTRO: return "粒子交互之旅";
+                    case AppStage.EARTH: return "蔚蓝星球";
+                    case AppStage.EVEREST: return "珠穆朗玛";
+                    case AppStage.NAME: return "专属定制";
+                    case AppStage.HEART: return "爱的凝聚";
+                    case AppStage.FIREWORKS: return "盛大庆典";
                     default: return "";
                 }
             };
 
             return (
-                <div className="relative w-full h-screen bg-black overflow-hidden select-none">
-                    <Canvas camera={{ position: [0, 0, 12], fov: 60 }} dpr={[1, 2]}>
-                        <color attach="background" args={['#050505']} />
+                <div className="relative w-full h-screen bg-black overflow-hidden select-none font-sans">
+                    <Canvas camera={{ position: [0, 0, 14], fov: 60 }} dpr={[1, 2]}>
+                        <color attach="background" args={['#020202']} />
                         <ambientLight intensity={0.5} />
                         <ParticleScene stage={STAGE_ORDER[currentStageIndex]} gesture={gesture} color={particleColor} />
                         <OrbitControls enableZoom={false} enablePan={false} autoRotate={!hasStarted} autoRotateSpeed={0.5} />
@@ -518,22 +553,21 @@
                     
                     <div className="absolute top-0 left-0 w-full p-6 flex flex-col md:flex-row justify-between items-start pointer-events-none z-10">
                         <div className="flex flex-col space-y-2 mb-4 md:mb-0">
-                            <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 drop-shadow-lg">{getTitle()}</h1>
-                            <p className="text-blue-200 text-lg md:text-xl font-mono animate-pulse">{getInstructions()}</p>
+                            <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 drop-shadow-[0_0_10px_rgba(100,200,255,0.5)]">{getTitle()}</h1>
+                            <p className="text-cyan-100 text-lg md:text-xl font-mono animate-pulse drop-shadow-md bg-black/30 px-2 rounded inline-block">{getInstructions()}</p>
                         </div>
-                        <div className="pointer-events-auto bg-black/40 backdrop-blur-md p-4 rounded-xl border border-white/10 flex flex-col gap-4 w-64">
+                        <div className="pointer-events-auto bg-black/60 backdrop-blur-md p-4 rounded-xl border border-white/10 flex flex-col gap-4 w-64 shadow-2xl">
                             <div className="flex flex-col gap-1">
-                                <label className="text-xs text-gray-400 uppercase font-semibold tracking-wider">Particle Color</label>
+                                <label className="text-xs text-gray-400 font-semibold tracking-wider">粒子颜色调节</label>
                                 <div className="flex items-center gap-2">
-                                    <input type="color" value={particleColor} onChange={(e) => setParticleColor(e.target.value)} className="w-8 h-8 cursor-pointer rounded border-none bg-transparent" />
-                                    <span className="text-xs text-gray-300 font-mono">{particleColor}</span>
+                                    <input type="color" value={particleColor} onChange={(e) => setParticleColor(e.target.value)} className="w-full h-8 cursor-pointer rounded border-none bg-transparent" />
                                 </div>
                             </div>
                             <div className="flex flex-col gap-2">
-                                <label className="text-xs text-gray-400 uppercase font-semibold tracking-wider">Manual Controls</label>
+                                <label className="text-xs text-gray-400 font-semibold tracking-wider">手动控制台</label>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <button onMouseDown={() => handleGestureChange(HandGesture.CLOSED)} onMouseUp={() => handleGestureChange(HandGesture.OPEN)} onTouchStart={() => handleGestureChange(HandGesture.CLOSED)} onTouchEnd={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-3 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg font-bold text-xs transition-all active:scale-95 shadow-lg border border-blue-400/30 touch-manipulation">HOLD (Fist)</button>
-                                    <button onClick={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-3 bg-gray-700/80 hover:bg-gray-600 text-white rounded-lg font-bold text-xs transition-all active:scale-95 border border-white/10 touch-manipulation">RELEASE</button>
+                                    <button onMouseDown={() => handleGestureChange(HandGesture.CLOSED)} onMouseUp={() => handleGestureChange(HandGesture.OPEN)} onTouchStart={() => handleGestureChange(HandGesture.CLOSED)} onTouchEnd={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-4 bg-gradient-to-b from-blue-600 to-blue-800 hover:from-blue-500 hover:to-blue-700 text-white rounded-lg font-bold text-sm transition-all active:scale-95 shadow-lg border border-blue-400/30 touch-manipulation">按住握拳</button>
+                                    <button onClick={() => handleGestureChange(HandGesture.OPEN)} className="px-3 py-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold text-sm transition-all active:scale-95 border border-white/10 touch-manipulation">松开手掌</button>
                                 </div>
                             </div>
                         </div>
@@ -542,12 +576,12 @@
                     <HandDetector onGestureChange={handleGestureChange} />
 
                     {!hasStarted && (
-                        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                            <div className="text-center space-y-8 p-8 max-w-lg bg-black/80 rounded-2xl border border-white/10 shadow-2xl mx-4">
+                        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md">
+                            <div className="text-center space-y-8 p-8 max-w-lg bg-gray-900/90 rounded-3xl border border-white/10 shadow-[0_0_50px_rgba(59,130,246,0.3)] mx-4">
                                 <div className="text-7xl animate-bounce">👋</div>
-                                <h2 className="text-3xl font-bold text-white tracking-tight">Particle Story</h2>
-                                <button onClick={startExperience} className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xl rounded-xl transition-all transform hover:scale-105 shadow-xl">Start Experience</button>
-                                <p className="text-xs text-gray-500">Camera not required in manual mode.</p>
+                                <h2 className="text-3xl font-bold text-white tracking-tight">手势粒子交互体验</h2>
+                                <button onClick={startExperience} className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xl rounded-xl transition-all transform hover:scale-105 shadow-xl ring-2 ring-white/20">开启体验</button>
+                                <p className="text-xs text-gray-500">提示：如无法使用摄像头，可使用界面右侧按钮</p>
                             </div>
                         </div>
                     )}

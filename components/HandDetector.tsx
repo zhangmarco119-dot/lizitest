@@ -1,20 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { HandGesture } from '../types';
 
-// We dynamically import MediaPipe types to avoid build-time/load-time blocking
-// The actual import happens in useEffect
-
 interface HandDetectorProps {
   onGestureChange: (gesture: HandGesture) => void;
 }
 
 const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'manual'>('loading');
   const lastGestureRef = useRef<HandGesture>(HandGesture.NONE);
   const frameIdRef = useRef<number>(0);
 
   useEffect(() => {
+    // Check if running from file protocol
+    if (window.location.protocol === 'file:') {
+        console.warn("Running from file:// protocol, switching to manual mode.");
+        setStatus('manual');
+        return;
+    }
+
     let handLandmarker: any = null;
     let running = true;
     let videoElement: HTMLVideoElement | null = null;
@@ -22,12 +26,10 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
     const setupMediaPipe = async () => {
       try {
         console.log("Loading MediaPipe module...");
-        // Dynamic import to prevent main thread blocking on initial load
         const { FilesetResolver, HandLandmarker } = await import('@mediapipe/tasks-vision');
         
         if (!running) return;
-        console.log("Initializing Vision Tasks...");
-
+        
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
         );
@@ -40,7 +42,7 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
             delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 2
+          numHands: 1
         });
 
         if (!running) {
@@ -60,7 +62,9 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
       videoElement = videoRef.current;
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480 } 
+        });
         if (!running) {
              stream.getTracks().forEach(t => t.stop());
              return;
@@ -81,7 +85,6 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
     const predictWebcam = (landmarker: any) => {
       if (!running || !videoRef.current) return;
       
-      // Ensure video has dimensions
       if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
            frameIdRef.current = requestAnimationFrame(() => predictWebcam(landmarker));
            return;
@@ -93,17 +96,30 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
       let detectedGesture = HandGesture.NONE;
 
       if (results.landmarks.length > 0) {
-        const landmarks = results.landmarks[0];
-        const wrist = landmarks[0];
-        const middleTip = landmarks[12];
-        const middleBase = landmarks[9];
+        const lm = results.landmarks[0];
+        
+        // Multi-finger check for robustness
+        // Check fingertips (8, 12, 16, 20) against their PIP joints (6, 10, 14, 18)
+        // If tips are BELOW joints (in y-axis relative to wrist orientation) or simply close to wrist
+        
+        const wrist = lm[0];
+        const tips = [lm[8], lm[12], lm[16], lm[20]]; // Index, Middle, Ring, Pinky
+        // const pips = [lm[6], lm[10], lm[14], lm[18]];
+        
+        let foldedFingers = 0;
+        
+        // Check distance of fingertips to wrist
+        // Average hand size ref -> Wrist to Middle Finger Base (0->9)
+        const handSize = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
+        const foldThreshold = handSize * 1.1; 
 
-        // Calculate distance squared
-        const distTipToWrist = Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y);
-        const distBaseToWrist = Math.hypot(middleBase.x - wrist.x, middleBase.y - wrist.y);
+        tips.forEach(tip => {
+            const dist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+            if (dist < foldThreshold) foldedFingers++;
+        });
 
-        // Simple heuristic: If tip is close to base/wrist, it's a fist.
-        if (distTipToWrist < distBaseToWrist * 1.2) {
+        // If 3 or more fingers are close to wrist -> FIST
+        if (foldedFingers >= 3) {
             detectedGesture = HandGesture.CLOSED;
         } else {
             detectedGesture = HandGesture.OPEN;
@@ -122,11 +138,10 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
 
     setupMediaPipe();
 
-    // Timeout to stop blocking if camera/AI never loads
     const timeout = setTimeout(() => {
         if (running && status === 'loading') {
-            console.warn("MediaPipe initialization timed out, falling back to manual");
-            setStatus('error'); // Trigger fallback UI
+            console.warn("MediaPipe init timeout");
+            setStatus('error');
         }
     }, 15000);
 
@@ -142,10 +157,18 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
     };
   }, []);
 
+  if (status === 'manual') {
+      return (
+        <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-blue-900/80 text-white text-xs max-w-[200px] border border-blue-500 backdrop-blur-md">
+           手动模式已激活（文件运行）
+        </div>
+      );
+  }
+
   if (status === 'error') {
       return (
-        <div className="fixed bottom-4 left-4 z-50 rounded-xl p-4 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500">
-           Camera unavailable. Please use manual buttons.
+        <div className="fixed bottom-4 left-4 z-50 rounded-xl p-3 bg-red-900/80 text-white text-xs max-w-[200px] border border-red-500 backdrop-blur-md">
+           摄像头不可用，请使用按钮控制
         </div>
       );
   }
@@ -161,7 +184,7 @@ const HandDetector: React.FC<HandDetectorProps> = ({ onGestureChange }) => {
        />
        {status === 'loading' && (
          <div className="absolute inset-0 flex items-center justify-center text-center text-[10px] text-white bg-black/80 p-2">
-           Loading AI...
+           AI 模型加载中...
          </div>
        )}
     </div>
